@@ -1,8 +1,8 @@
 # build os
 
-
-install dosctl to your PATH, change to a (empty) working directory
+dosctl installed to your PATH, change to a (empty) working directory and build kernel+initrd
 ```
+dosctl os <YML-FILE>
 dosctl <YML-FILE>
 ```
 
@@ -17,4 +17,28 @@ dosctl run <YML-FILE>
 
 ```
 dosctl img dengleros/os-rustysd:latest -build -push
+```
+
+# services in container
+
+All services run in crun container.
+```
+/ # crun list 
+NAME   PID       STATUS   BUNDLE PATH                            
+rngd   825       running  /containers/services/rngd              
+udhcpc 826       running  /containers/services/udhcpc            
+mdevd  827       running  /containers/services/mdevd             
+sshd   824       running  /containers/services/sshd
+```
+
+# gpm package manager
+
+Successfully booted DenglerOS try to install example package
+```
+gpm update
+gpm install docker
+/prepare.sh /containers/services/docker  # workaround to update unitfile... without trailing "/"!!!
+rsdctl /notifications/control.socket reload  # update / add new service to rustysd
+rsdctl /notifications/control.socket restart docker.service   # (re-)start service "docker"
+crun exec -t docker docker run --rm -ti alpine sh   # :)
 ```
