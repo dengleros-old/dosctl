@@ -8,7 +8,7 @@ dosctl <YML-FILE>
 
 # run os
 
-Execute from the same working directory as above
+Execute from the same working directory as above. YML-File or project name (YML file name without extension)
 ```
 dosctl run <YML-FILE>
 ```
