@@ -1,0 +1,264 @@
+#!/bin/sh
+
+YML=dengleros.yml
+ACTION=os
+BUILD_OPTS=
+
+FORCE_PUSH=0
+FORCE_PULL=0
+FORCE_BUILD=0
+
+DOCKER_REPO=dengleros
+DOCKER_TAG=latest
+
+GIT_URL=https://github.com/dengleros
+GIT_SUFFIX=master
+
+BASE_IMG=alpine:3.11.3
+BUILD_BASE_IMG=base-image
+KERNEL_BASE_IMG=base-kernel
+KERNEL_PKG=linux-lts
+KERNEL_FILE=vmlinuz-lts
+
+DOCKER_BIN=$(which docker)
+DOCKER_SOCK="/var/run/docker.sock"
+DOCKER_LOGIN="$HOME/.docker/config.json"
+
+LXKIT_IMAGE=dengleros/linuxkit:latest
+LXKIT_WORKDIR=$(pwd)
+LXKIT_OUTDIR=$LKIT_WORKDIR
+LXKIT_FORMAT=
+
+QEMU_IMAGE=dengleros/qemu:latest
+
+
+
+while [ "$1" != "" ]; do
+    case $1 in
+        os|pkg|run|img|import)
+            ACTION=$1
+        ;;
+        -giturl)
+            shift
+            GIT_URL=$1
+        ;;
+        -gitsuffix)
+            shift
+            GIT_SUFFIX=$1
+        ;;
+        -baseimg)
+            shift
+            BASE_IMG=$1
+        ;;
+        -kbaseimg)
+            shift
+            KERNEL_BASE_IMG=$1
+        ;;
+        -kpkg)
+            shift
+            KERNEL_PKG=$1
+        ;;
+        -kfile)
+            shift
+            KERNEL_FILE=$1
+        ;;
+        -pull)
+            FORCE_PULL=1
+        ;;
+        -push)
+            FORCE_PUSH=1
+        ;;
+        -build)
+            FORCE_BUILD=1
+        ;;
+        -build_opts)
+            shift
+            BUILD_OPTS="$BUILD_OPTS $1"
+	    FORCE_BUILD=1
+        ;;
+        -format)
+            shift
+            LXKIT_FORMAT=$1
+        ;;
+        -lxkitimg)
+            shift
+            LXKIT_IMAGE=$1
+        ;;
+        -qemuimg)
+            shift
+            QEMU_IMAGE=$1
+        ;;
+        *)
+            if [ -f $1 ]; then
+                YML=$1
+            else 
+                OPTS="$OPTS $1"
+            fi
+        ;;
+    esac
+    shift				
+done
+
+
+
+build_image() {
+    BUILD_REPO=${1%%/*}
+    BUILD_TAG=${1##*:}
+    BUILD_IMG=$(expr "$1" : "$BUILD_REPO/\(.*\):$BUILD_TAG")
+    BUILD_DIR=$(find . -name $BUILD_IMG)
+
+    echo -n "--> try to build local... "
+    if [ -z "$BUILD_DIR" ] || [ ! -d $BUILD_DIR ]; then
+        echo "no (unique) local build dir. SKIP!"
+        echo -n "--> try to build remote... "
+        BUILD_DIR="$GIT_URL/$BUILD_IMG.git#${GIT_SUFFIX}"
+    fi
+
+    echo "BUILD_IMG=$BUILD_IMG"
+    echo "BUILD_DIR=$BUILD_DIR"
+
+    #DOCKER_BUILDKIT=1 
+    $DOCKER_BIN build $BUILD_OPTS \
+    -t $BUILD_REPO/$BUILD_IMG:$BUILD_TAG \
+    --build-arg BASE_IMG=$BASE_IMG \
+    --build-arg BUILD_BASE_IMAGE=$BUILD_REPO/$BUILD_BASE_IMG:$BUILD_TAG \
+    --build-arg KERNEL_BASE_IMG=$BUILD_REPO/$KERNEL_BASE_IMG:$BUILD_TAG --build-arg KERNEL_PKG=$KERNEL_PKG --build-arg KERNEL_FILE=$KERNEL_FILE \
+    $BUILD_DIR
+
+    if [ $FORCE_PUSH -eq 1 ]; then
+        $DOCKER_BIN push $BUILD_REPO/$BUILD_IMG:$BUILD_TAG
+    fi
+}
+
+
+
+import_image() {
+    DST=$1
+    DST_REPO=${1%%/*}
+    DST_TAG=${1##*:}
+    DST_IMG=$(expr "$1" : "$DST_REPO/\(.*\):$DST_TAG")
+
+    $DOCKER_BIN tag $DOCKER_REPO/$DST_IMG:$DOCKER_TAG $DST
+
+    if [ $FORCE_PUSH -eq 1 ]; then
+        $DOCKER_BIN push $DST
+    fi
+}
+
+
+
+get_image() {
+    IMAGE=$1
+
+    if [ $FORCE_BUILD -eq 1 ]; then
+        echo 'forced to build!'
+        build_image $IMAGE
+    elif [ $FORCE_PULL -eq 1 ] || [ -z "$($DOCKER_BIN images -q $IMAGE)" ]; then
+        echo -n "try to pull... "
+        $DOCKER_BIN pull -q $IMAGE > /dev/null # try to pull...
+
+	if [ $? -ne 0 ]; then # if can't pull image...
+            echo 'Need to build!'
+            build_image $IMAGE
+        else # successfully pulled...
+            echo 'successfully pulled.   OK!'
+        fi
+    else # existing local image
+        echo 'local image available.   OK!'
+    fi
+
+    if [ $FORCE_PUSH -eq 1 ]; then
+        echo "Push image '$IMAGE'..."
+	$DOCKER_BIN push $IMAGE
+    fi
+}
+
+
+
+prepare_images() {
+    while [ "$1" != "" ]; do
+        get_image $1
+	shift
+    done
+}
+
+
+
+parse_yml() {
+    SECTION=
+    IMAGES=
+    IFS='' # keep spaces
+
+    while read line; do
+        MATCH=$(echo $line | grep -Eo "^\w+:$" | tr -d ':') # current yml file section
+        SECTION=${MATCH:-$SECTION}
+        case $SECTION in
+            kernel|onboot|services|onshutdown)
+                IMAGE=$(echo $line | awk '/image:/ {print $2}')
+            ;;
+            init)
+                IMAGE=$(echo $line | awk '$1 == "-" {print $2}')
+            ;;
+        esac
+
+	if [ ! -z "$IMAGE" ]; then
+            #get_image $IMAGE $SECTION
+	    IMAGES="$IMAGES $IMAGE"
+	fi
+    done < $YML
+    echo $IMAGES | sed 's/^ *//'
+}
+
+
+
+linuxkit() {
+    YML_FILE=$(realpath $YML)
+    $DOCKER_BIN run --rm -ti \
+        -v $LXKIT_OUTDIR:$LKIT_OUTDIR \
+        -v $LXKIT_WORKDIR:$LXKIT_WORKDIR \
+	-v $DOCKER_SOCK:/var/run/docker.sock \
+	-v $DOCKER_LOGIN:/root/.docker/config.json \
+	-v $YML_FILE:$YML_FILE \
+	--workdir $LXKIT_WORKDIR \
+        $LXKIT_IMAGE \
+	$@ \
+	$YML_FILE
+}
+
+
+
+qemu() {
+    KERNEL=$(basename $YML .yml)-kernel
+    INITRD=$(basename $YML .yml)-initrd.img
+    APPEND=$(cat $(basename $YML .yml)-cmdline)
+
+    qemu-system-x86_64 -m 2048M -enable-kvm -kernel $KERNEL -initrd $INITRD -nographic -device pvpanic -append "$APPEND"
+}
+
+
+
+case $ACTION in
+    os)
+        echo Parse images from YML file...
+	prepare_images $(parse_yml)
+        echo Build OS with linuxkit
+	linuxkit build -format ${LXKIT_FORMAT:-kernel+initrd} $OPTS
+    ;;
+    pkg)
+        echo "Build PKG for gpm"
+        echo "Need to be output as tar.gz!"
+        linuxkit build -format ${LXKIT_FORMAT:-tar} $OPTS
+	gzip $(basename $YML .yml).tar
+    ;;
+    img)
+        echo Parse images from yml file and build Docker image...
+        prepare_images $(parse_yml)
+    ;;
+    run)
+        echo Run OS with qemu
+	qemu $OPTS
+    ;;
+    import)
+        echo Import images
+    ;;
+esac
