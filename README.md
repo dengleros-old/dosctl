@@ -8,7 +8,7 @@ dosctl <YML-FILE>
 
 # run os
 
-Execute from the same working directory as above. YML-File or project name (YML file name without extension)
+Execute from the same working directory as above. YML-File or project name (YML file name without extension). Local installed qemu is needed.
 ```
 dosctl run <YML-FILE>
 ```
@@ -33,7 +33,7 @@ sshd   824       running  /containers/services/sshd
 
 # gpm package manager
 
-Successfully booted DenglerOS try to install example package
+Successfully booted DenglerOS try to install example package with gpm (git package manager)
 ```
 gpm update
 gpm install docker
