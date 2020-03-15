@@ -189,6 +189,10 @@ parse_yml() {
     IMAGES=
     IFS='' # keep spaces
 
+    if [ ! -f ]; then
+        YML="$(wget -qO- $YML)"
+    fi
+
     while read line; do
         MATCH=$(echo $line | grep -Eo "^\w+:$" | tr -d ':') # current yml file section
         SECTION=${MATCH:-$SECTION}
@@ -252,7 +256,7 @@ case $ACTION in
     ;;
     img)
         echo Parse images from yml file and build Docker image...
-        prepare_images $(parse_yml)
+	prepare_images ${OPTS:-$(parse_yml)}
     ;;
     run)
         echo Run OS with qemu

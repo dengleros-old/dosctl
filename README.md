@@ -12,3 +12,9 @@ Execute from the same working directory as above
 ```
 dosctl run <YML-FILE>
 ```
+
+# Build docker image
+
+```
+dosctl img dengleros/os-rustysd:latest -build -push
+```
