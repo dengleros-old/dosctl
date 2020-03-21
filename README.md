@@ -31,6 +31,19 @@ mdevd  827       running  /containers/services/mdevd
 sshd   824       running  /containers/services/sshd
 ```
 
+# sshd and nsenter host
+
+You need to set a password to login with ssh.
+```
+crun exec -t sshd passwd
+```
+
+After logged in as root user you can switch to host namespace
+```
+nsenter -t 1 -m -u -i -n sh
+```
+
+
 # gpm package manager
 
 Successfully booted DenglerOS try to install example package with gpm (git package manager)
